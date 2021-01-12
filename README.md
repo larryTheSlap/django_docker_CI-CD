@@ -1,1 +1,1 @@
-# django_docker_CI-CD
+# CI/CD pipeline implementation with terraform
