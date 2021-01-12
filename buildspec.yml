@@ -1,0 +1,19 @@
+version: 0.1
+
+phases:
+  pre_build:
+    commands:
+      - echo Logging to amazon 129806739025.dkr.ecr.us-east-1.amazonaws.com/django_dock_repo
+      - aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 129806739025.dkr.ecr.us-east-1.amazonaws.com
+  build:
+    commands:
+      - echo Build start on `date`
+      - echo building Docker image..
+      - docker build -t django_dock . 
+      - docker tag django_dock:latest 129806739025.dkr.ecr.us-east-1.amazonaws.com/django_dock:latest
+
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Pushing the Docker image...
+      - docker push 129806739025.dkr.ecr.us-east-1.amazonaws.com/django_dock:latest

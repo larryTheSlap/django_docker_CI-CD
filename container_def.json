@@ -1,0 +1,14 @@
+[
+    {
+        "name": "django_web_app",
+        "image": "129806739025.dkr.ecr.us-east-1.amazonaws.com/django_dock:latest",
+        "essential": true,
+        "portMappings": [
+            {
+                "hostPort": 80,
+                "protocol": "tcp",
+                "containerPort": 80
+            }
+        ]
+    }
+]

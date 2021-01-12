@@ -1,0 +1,24 @@
+{
+    "executionRoleArn": "arn:aws:iam::129806739025:role/ecsTaskExecutionRole",
+    "containerDefinitions": [
+        {
+            "name": "django_web_app",
+            "image": "<IMAGE_NAME>",
+            "essential": true,
+            "portMappings": [
+                {
+                    "hostPort": 80,
+                    "protocol": "tcp",
+                    "containerPort": 80
+                }
+            ]
+        }
+    ],
+    "requiresCompatibilities": [
+        "FARGATE"
+    ],
+    "networkMode": "awsvpc",
+    "cpu": "256",
+    "memory": "512",
+    "family": "task_def"
+}
