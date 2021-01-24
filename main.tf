@@ -746,3 +746,4 @@ resource "aws_codepipeline" "django_half_pipeline2" {
         
     }
 }
+#
