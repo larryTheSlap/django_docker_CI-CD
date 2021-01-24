@@ -4,9 +4,10 @@ provider "aws" {
 
 
 locals {
-    id_vpc = aws_vpc.prod_vpc.id
-    eip_id = "eipalloc-0cfa1781be9492633"
+    id_vpc   = aws_vpc.prod_vpc.id
+    eip_id   = "eipalloc-0cfa1781be9492633"
     def_addr = "0.0.0.0/0"
+    usr_id   = "129806739025"
 }
 
 #vpc configuration
@@ -26,10 +27,15 @@ resource "aws_internet_gateway" "my_igw" {
   }
 }
 
-#create codecommit repo
-resource "aws_codecommit_repository" "test" {
+#create codecommit repo for our django app and another repo for deployment files
+resource "aws_codecommit_repository" "django_repo" {
     repository_name = "django_repo"
     description     = "django web application git repository"
+}
+
+resource "aws_codecommit_repository" "deployment" {
+    repository_name = "dep_repo"
+    description     = "contains files used for deployment"
 }
 
 ################## AWS CODEBUILD CONF ##################
@@ -119,7 +125,7 @@ resource "aws_iam_role" "django_codebuild_dock_role" {
     name = "django_codebuild_dock_role"
 
     assume_role_policy = <<EOF
-    {
+{
       "Version": "2012-10-17",
       "Statement": [
         {
@@ -129,9 +135,9 @@ resource "aws_iam_role" "django_codebuild_dock_role" {
           },
           "Effect": "Allow",
           "Sid": ""
-        }
-      ]
-    }
+       }
+       ]
+}
 EOF
 }
 
@@ -156,7 +162,7 @@ resource "aws_iam_role_policy" "codebuild_role_policy" {
         {
             "Effect": "Allow",
             "Resource": [
-                "arn:aws:codecommit:us-east-1:129806739025:django_repo"
+                "arn:aws:codecommit:us-east-1:${local.usr_id}:django_repo"
             ],
             "Action": [
                 "codecommit:GitPull"
@@ -193,11 +199,11 @@ resource "aws_iam_role_policy" "codebuild_role_policy" {
             "Action": [
                 "ec2:CreateNetworkInterfacePermission"
             ],
-            "Resource": "arn:aws:ec2:us-east-1:129806739025:network-interface/*",
+            "Resource": "arn:aws:ec2:us-east-1:${local.usr_id}:network-interface/*",
             "Condition": {
                 "StringEquals": {
                     "ec2:Subnet": [
-                        "arn:aws:ec2:us-east-1:129806739025:subnet/subnet-002073080d5c66ac1"
+                        "arn:aws:ec2:us-east-1:${local.usr_id}:subnet/${aws_subnet.private_subnet_codebuild.id}"
                     ],
                     "ec2:AuthorizedService": "codebuild.amazonaws.com"
                 }
@@ -398,7 +404,7 @@ resource "aws_lb_listener" "alb_listener2" {
 resource "aws_ecs_task_definition" "task_def" {
 
     family                   = "task_def"
-    execution_role_arn       = "arn:aws:iam::129806739025:role/ecsTaskExecutionRole"
+    execution_role_arn       = "arn:aws:iam::${local.usr_id}:role/ecsTaskExecutionRole"
     container_definitions    = file("container_def.json")
     requires_compatibilities = [ "FARGATE" ]
     network_mode             = "awsvpc"
@@ -566,5 +572,177 @@ resource "aws_codedeploy_deployment_group" "prod_deployment_grp" {
     auto_rollback_configuration {
         enabled = true
         events  = ["DEPLOYMENT_FAILURE"]
+    }
+}
+
+################## CODEPIPELINE CONFIG ##################
+
+resource "aws_iam_role" "codepipeline_role" {
+
+    name               = "django-codepipeline-role"
+    assume_role_policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "codepipeline.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
+}
+
+resource "aws_iam_role_policy" "codepipeline_policy" {
+    name = "django-codepipeline-policy"
+    role = aws_iam_role.codepipeline_role.id
+    policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect":"Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:GetObjectVersion",
+        "s3:GetBucketVersioning",
+        "s3:PutObject"
+      ],
+      "Resource": [
+        "${aws_s3_bucket.artifact_bucket1.arn}",
+        "${aws_s3_bucket.artifact_bucket1.arn}/*",
+        "${aws_s3_bucket.artifact_bucket2.arn}",
+        "${aws_s3_bucket.artifact_bucket2.arn}/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "codebuild:BatchGetBuilds",
+        "codebuild:StartBuild"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+EOF 
+}
+
+resource "aws_s3_bucket" "artifact_bucket1" {
+  bucket = "artifact125643-bucket"
+  acl    = "private"
+}
+resource "aws_s3_bucket" "artifact_bucket2" {
+  bucket = "artifact225643-bucket"
+  acl    = "private"
+}
+#first half of the pipeline
+resource "aws_codepipeline" "django_half_pipeline1" {
+    name     = "django_half_pipeline1"
+    role_arn = aws_iam_role.codepipeline_role.arn
+
+    artifact_store {
+      location = aws_s3_bucket.artifact_bucket1.bucket
+      type     = "S3"
+    }
+
+    stage {
+      name = "Source"
+
+      action {
+          category = "Source"
+          owner    = "AWS"
+          name     = "source"
+          provider = "CodeCommit"
+          version  = "1"
+
+          configuration = {
+            RepositoryName = "django_repo"
+            BranchName     = "master"
+           }
+        }
+    }
+
+    stage {
+      name = "Build"
+
+      action {
+          name     = "Build"
+          category = "Build"
+          owner    = "AWS"
+          provider = "CodeBuild"       
+          version  = "1"   
+
+          configuration = {
+            ProjectName = "django_codebuild_project"
+          }    
+        }
+        
+    }
+}
+#second half of the pipeline
+resource "aws_codepipeline" "django_half_pipeline2" {
+    name     = "django_half_pipeline2"
+    role_arn = aws_iam_role.codepipeline_role.arn
+
+    artifact_store {
+      location = aws_s3_bucket.artifact_bucket2.bucket
+      type     = "S3"
+    }
+
+    stage {
+      name = "Source"
+
+      action {
+          category = "Source"
+          owner    = "AWS"
+          name     = "source"
+          provider = "ECR"
+          version  = "1"
+          output_artifacts = [ "image" ]
+
+          configuration = {
+            RepositoryName = "django_dock"
+           }
+        }
+
+      action {
+        category = "Source"
+          owner    = "AWS"
+          name     = "source"
+          provider = "CodeCommit"
+          version  = "1"
+          output_artifacts = [ "task_def" ]
+
+          configuration = {
+            RepositoryName = "dep_repo"
+            BranchName     = "master"
+           }
+        }
+    }
+
+    stage {
+      name = "Deploy"
+
+      action {
+          name     = "Deploy"
+          category = "Deploy"
+          owner    = "AWS"
+          provider = "CodeDeployToECS"       
+          version  = "1"   
+
+          configuration = {
+            ApplicationName                = "django-deploy"
+            DeploymentGroupName            = "prod-deployment-grp"
+            TaskDefinitionTemplateArtifact = "task_def"
+            AppSpecTemplateArtifact        = "task_def"
+            Image1ArtifactName             = "image"
+            Image1ContainerName            = "IMAGE_NAME"
+          }    
+        }
+        
     }
 }
