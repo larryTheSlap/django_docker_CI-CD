@@ -1,4 +1,4 @@
-# CI/CD pipeline implementation with terraform
+# CI/CD pipeline implementation with terraform on AWS
 
 Project :
 
